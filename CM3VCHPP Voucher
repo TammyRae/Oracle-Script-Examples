@@ -1,0 +1,222 @@
+Made Changes to script--insert step 25 to replace Step35 will now be skipped.
+
+Step 3 - Height
+
+Step 5 - Edit Data
+	move "$CONTEXT-ACCOUNTID" to "Cm3voucherpayplanadd/account1";
+
+Step 7 - Edit Data - Invoke Eligibility
+
+	move "$CONTEXT-ACCOUNTID" to "Cm3VoucherEligibilityCheck/input/accountId";
+	invokeBS 'Cm3VoucherEligibilityCheck' using "Cm3VoucherEligibilityCheck";
+
+Step 8 - Edit Data - Check for active Pay Plan or Pay Arrangement
+	default $isValid;
+	default $paChek;
+	default $ppChek;
+
+
+	move 'true' to $isValid;
+	move "$CONTEXT-ACCOUNTID" to "Cm3VoucherEligibilityCheck/input/accountId";
+	invokeBS 'Cm3VoucherEligibilityCheck' using "Cm3VoucherEligibilityCheck";
+
+	if ("Cm3VoucherEligibilityCheck/results/payarrChek='Y'")
+		move 'There is an Active Pay Arrangement on this Account'  to $paChek;
+	move 'false' to $isValid;
+	end-if;
+	if ("Cm3VoucherEligibilityCheck/results/payplanChek='Y'")
+		move 'There is an Active Pay Plan on this Account'  to $ppChek;
+	move 'false' to $isValid;
+	end-if;
+
+
+	if("$isValid='false'")
+	goto 210;
+
+	end-if;
+Step 10 - Invoke Map - Voucher payplan add
+
+	Group Name Cm3voucherpayplanadd
+	ui mAP	 Cm3voucherpayplannadd
+	Target Area	Page Area
+
+Step 20 - Edit data - Create PayPlan
+	move "Cm3voucherpayplanadd/agency1" to "CM3Agencyacctbyname/input/AgencyCode";
+	invokeBS 'CM3Agencyacctbyname' using "CM3Agencyacctbyname";
+
+	move "Cm3voucherpayplanadd/account1" to "CM2PYPLANMAINT/accountId";
+
+	//If ("parm/input/payorAccountId = $BLANK ")
+	   // move "parm/input/accountId" to "CM2PYPLANMAINT/payorAccountId";
+	//else
+		move "CM3Agencyacctbyname/results/payorAcct" to "CM2PYPLANMAINT/payorAccountId";
+	//end-if;
+
+	move 'Created from Script' to  "CM2PYPLANMAINT/comments";
+
+	move 'IN OFFICE' to  "CM2PYPLANMAINT/paymentMethod";
+
+	move 'true' to "CM2PYPLANMAINT/isThirdPartyGuarantor";
+	move "Cm3voucherpayplanadd/agency1" to "CM2PYPLANMAINT/thirdPartyPayor";
+
+	move 'VOUCHER     ' to "CM2PYPLANMAINT/paymentPlanType";
+
+	move '20' to "CM2PYPLANMAINT/paymentPlanStatus";
+	move "$CURRENT-DATE" to "CM2PYPLANMAINT/startDate";
+
+	move "Cm3voucherpayplanadd/schedDate1" to "CM2PYPLANMAINT/+pps/scheduledDate";
+	move "Cm3voucherpayplanadd/schedAmt1" to "CM2PYPLANMAINT/pps[last()]/scheduledAmount";
+	invokeBS 'CM2PYPLANMAINT' using "CM2PYPLANMAINT"  ;
+
+
+
+
+	//move 'true' to "parm/output/successFlag";
+
+Step 25 - Edit data - Create Electronic Communications Contact
+move "Cm3voucherpayplanadd/account1" to "Cm3MAINPERSON/input/acctId";
+invokeBS 'Cm3MAINPERSON' using "Cm3MAINPERSON";
+
+
+move "Cm3MAINPERSON/results/perId" to "C1-PersonContactDetails/personId";
+	 
+invokeBO 'C1-PersonContactDetails' using "C1-PersonContactDetails" for read;
+
+move "C1-PersonContactDetails/name" to $theName;
+move "C1-PersonContactDetails/email" to $cm2ToEmailId;
+
+move '' to $custContactComment;
+
+
+move "Cm3MAINPERSON/results/perId" to "CmECommVoucherRcvd/personId";
+move "Cm3voucherpayplanadd/account1" to "CmECommVoucherRcvd/customData/acctId";
+move 'VOUCHERPROC_RCVD' to "CmECommVoucherRcvd/customData/processId";
+move "C1-PersonContactDetails/name" to "CmECommVoucherRcvd/customData/customerName";
+move "CM2PYPLANMAINT/totalAmount" to "CmECommVoucherRcvd/customData/voucherAmount";
+move "CM2PYPLANMAINT/pps/scheduledDate" to  "CmECommVoucherRcvd/customData/payDate";
+move "CM2PYPLANMAINT/payPlanId" to "CmECommVoucherRcvd/customData/confirmationNumber";
+
+move "concat('Agency Hold:',CM2PYPLANMAINT/payPlanId, '  ', 'VOUCHER AMOUNT=', CM2PYPLANMAINT/totalAmount, ' ', 'SCHEDULED DATE=', CM2PYPLANMAINT/pps/scheduledDate,  '  ',  'CURRENTBALANCE=', CM2PYPLANMAINT/debtCurrentBalance, '  ', 'EMAIL=', C1-PersonContactDetails/email,' ','AGENCY=',Cm3voucherpayplanadd/agency1,'  Notes:'Cm3voucherpayplanadd/Description)" to $custContactComment;
+move "$custContactComment" to "CmECommVoucherRcvd/longDescription";
+
+//Need money saving tip(s)
+//Invoke Bill Messages
+move "CM2PYPLANMAINT/accountId" to "CM2_BILLMSG/input/acctId";
+
+move "substring($CURRENT-DATE,3,10)" to $date;
+move "$date" to "CM2_BILLMSG/input/startDt";
+move "$date" to "CM2_BILLMSG/input/endDt";
+
+invokeBS 'CM2_BILLMSG' using "CM2_BILLMSG";
+move '' to $tipText;
+move "concat($tipText, '<ul>')" to $tipText;
+for($results in "CM2_BILLMSG/results")
+	move "concat($tipText, '<li>')" to $tipText;
+	move "concat($tipText, $results/bill_msg)" to $tipText;
+	move "concat($tipText, '</li>')" to $tipText;
+end-for;
+move "concat($tipText, '</ul>')" to $tipText;
+
+move "concat('MONEYSAVINGSTIP=', $tipText)" to "CmECommVoucherRcvd/customData/moneySavingsTip";
+
+invokeBO 'CmECommVoucherRcvd' using "CmECommVoucherRcvd" for add;
+move 'F' to $errorFound;	
+if ("$ERROR")
+	move 'T' to $errorFound;
+	//move "concat($stackEmUp,'___err_CmECommVoucherRcvd:',$ERRMSG-TEXT,"")" to $stackEmUp;
+end-if;	
+
+//skip step 30 and 35--emails will now be send using EC customer contact through MessageBroadcast.
+goto 200;
+	
+	
+Step 30 - Edit data - Create Contact
+	move "Cm3voucherpayplanadd/account1" to "Cm3MAINPERSON/input/acctId";
+	invokeBS 'Cm3MAINPERSON' using "Cm3MAINPERSON";
+
+
+	move "Cm3MAINPERSON/results/perId" to "C1-PersonContactDetails/personId";
+		 
+		 invokeBO 'C1-PersonContactDetails' using "C1-PersonContactDetails" for read;
+		 
+		 move "C1-PersonContactDetails/name" to $theName;
+		 move "C1-PersonContactDetails/email" to $cm2ToEmailId;
+
+
+
+	move "Cm3MAINPERSON/results/perId" to "CM-CreateCustomerContact/personId";
+	move '' to $custContactComment;
+
+		move "concat('Agency Hold:',CM2PYPLANMAINT/payPlanId, '  ', 'VOUCHER AMOUNT=', CM2PYPLANMAINT/totalAmount, ' ', 'SCHEDULED DATE=', CM2PYPLANMAINT/pps/scheduledDate,  '  ',  'CURRENTBALANCE=', CM2PYPLANMAINT/debtCurrentBalance, '  ', 'EMAIL=', C1-PersonContactDetails/email,' ','AGENCY=',Cm3voucherpayplanadd/agency1,'  Notes:'Cm3voucherpayplanadd/Description)" to $custContactComment;
+
+
+	move 'AGHLDNOT' to "CM-CreateCustomerContact/contactType";
+	move 'CS' to "CM-CreateCustomerContact/contactClass";
+	move "$custContactComment" to "CM-CreateCustomerContact/longDescription";
+	invokeBO 'CM-CreateCustomerContact' using "CM-CreateCustomerContact" for add;
+	
+Step 35 - Edit Data - email and bill message
+	// move "C1-PersonContactDetails/email" to "CM2SENDEMAILBS/toEmailAddress";
+
+	move "$cm2ToEmailId" to "CM2SENDEMAILBS/toEmailAddress";
+	//move 'dailcb@jea.com' to "CM2SENDEMAILBS/bccEmailAddress";
+	move 'Agency Hold Notification'  to "CM2SENDEMAILBS/subject";
+	move 'CM3AGYHLD' to "CM2SENDEMAILBS/templateName";
+	move 'UIMAP' to "CM2SENDEMAILBS/emailContentType";
+	move "concat(CM-CreateCustomerContact/user,'@jea.com')" to "CM2SENDEMAILBS/bccEmailAddress";
+
+	move '' to  $theParameters;
+	move "concat($theParameters, '##', 'ACCOUNTNUMBER=',  CM2PYPLANMAINT/accountId)" to $theParameters;
+	move "concat($theParameters, '##', 'VOUCHERNUMBER=', CM2PYPLANMAINT/payPlanId)" to $theParameters;
+	move "concat($theParameters, '##', 'ACCTBALANCE=', CM2PYPLANMAINT/totalAmount)" to $theParameters;
+	move "concat($theParameters, '##', 'CUSTOMERNAME=',C1-PersonContactDetails/name)" to $theParameters;
+	move "concat($theParameters, '##', 'PAYDATE=', CM2PYPLANMAINT/pps/scheduledDate)" to $theParameters;
+	move "concat($theParameters, '##', 'VOUCHERAMOUNT=', CM2PYPLANMAINT/pps/scheduledAmount)" to $theParameters;
+
+
+
+	//Invoke Bill Messages
+	move "CM2PYPLANMAINT/accountId" to "CM2_BILLMSG/input/acctId";
+
+	move "substring($CURRENT-DATE,3,10)" to $date;
+	move "$date" to "CM2_BILLMSG/input/startDt";
+	move "$date" to "CM2_BILLMSG/input/endDt";
+
+	invokeBS 'CM2_BILLMSG' using "CM2_BILLMSG";
+	move '' to $tipText;
+	move "concat($tipText, '<ul>')" to $tipText;
+	for($results in "CM2_BILLMSG/results")
+		move "concat($tipText, '<li>')" to $tipText;
+		move "concat($tipText, $results/bill_msg)" to $tipText;
+		move "concat($tipText, '</li>')" to $tipText;
+	end-for;
+	move "concat($tipText, '</ul>')" to $tipText;
+	move "concat($theParameters, '##', 'MONEYSAVINGSTIP=', $tipText)" to $theParameters;
+
+
+	move "$theParameters" to "CM2SENDEMAILBS/emailParamLst";
+	invokeBS 'CM2SENDEMAILBS' using "CM2SENDEMAILBS";
+	
+Step 200 - Edit Data
+	if ("$errorFound = 'F'")
+		move "concat('Agency Hold:',CM2PYPLANMAINT/payPlanId, '  ', 'VOUCHER AMOUNT=', CM2PYPLANMAINT/totalAmount, ' ', 'SCHEDULED DATE=', CM2PYPLANMAINT/pps/scheduledDate,  '  ',  'CURRENTBALANCE=', CM2PYPLANMAINT/debtCurrentBalance, '  ', 'EMAIL=', C1-PersonContactDetails/email)" to "CM2Message/aMessage";
+	else
+		move 'Error processing Customer Contact for Voucher Received.' to  CM2Message/aMessage";
+	end-if;
+    
+    invokeMap 'CM2Message' using "CM2Message" target popup;
+			
+Step 205 - Terminate - Terminate after create
+
+Step 210 - Display text - %ppChek %paChek %+CM2PYPLANMAINT+%
+
+	%ppChek 
+
+	%paChek
+	%+CM2PYPLANMAINT+%
+
+Step 220 - Edit Data
+
+	move "concat($ppChek, '  ', $paChek, ' ')" to "CM2Message/aMessage";
+    
+    invokeMap 'CM2Message' using "CM2Message" target popup;
